@@ -7,20 +7,23 @@ elif [ "$1" == "-c" -o "$1" == "-C" ]; then
     mode="$1"
     command="${2?}"
     shift 2
-elif [ "$1" == "-p" -o "$1" == "-i" ]; then
+elif [ "$1" == "-p" -o "$1" == "-i" -o "$1" == "-" ]; then
     mode="$1"
     shift
 else
-    mode=""
+    mode="-c"
+    command="$1"
+    shift
 fi
 
 if [ "$mode" == "-h" ]; then
     echo "py - pysession client (https://github.com/iliazeus/pysession)"
-    echo "Usage: py -c <code> [...args]  - run code"
-    echo "       py -C <code> [...args]  - run code with stdin"
-    echo "       py -p [...args]         - print args"
-    echo "       py -i [...args]         - interactive mode"
-    echo "       py | py -h              - this text"
+    echo "Usage: py -                      - run code from stdin"
+    echo "       py [-c] <code> [...args]  - run code"
+    echo "       py -C <code> [...args]    - run code with stdin"
+    echo "       py -p [...args]           - print args"
+    echo "       py -i [...args]           - interactive mode"
+    echo "       py -h                     - this text"
     exit 0
 fi
 
