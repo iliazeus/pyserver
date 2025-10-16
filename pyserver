@@ -7,6 +7,21 @@ from signal import signal, SIGINT, SIGTERM
 from socket import socket, AF_UNIX
 import sys
 
+
+class PyserverConsole(InteractiveConsole):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.status = 0
+
+    def showtraceback(self, *args, **kwargs):
+        self.status = 1
+        return super().showtraceback(*args, **kwargs)
+
+    def showsyntaxerror(self, *args, **kwargs):
+        self.status = 2
+        return super().showsyntaxerror(*args, **kwargs)
+
+
 session = {}
 
 lsock = socket(AF_UNIX)
@@ -25,16 +40,31 @@ while True:
     sock.close()
 
     with f:
+        l = int(f.readline())
+        argv = [f.read(l)]
         argc = int(f.readline())
-        argv = [sys.argv[0]]
         for i in range(argc):
             l = int(f.readline())
             argv.append(f.read(l))
         f.read(1)
-        session["argv"] = argv
+        session["argv"] = [*argv]
+
+        sys.stdin = f
+        session["stdin"] = f
 
         sys.stdout = f
-        cons = InteractiveConsole(locals=session)
-        for line in f:
-            cons.push(line)
-        cons.push("")
+        session["stdout"] = f
+
+        cons = PyserverConsole(locals=session)
+        if argv[-1][-1] == "i":
+            cons.interact()
+        else:
+            for line in f:
+                cons.push(line)
+                if cons.status != 0:
+                    break
+            else:
+                cons.push("")
+
+            if argv[-1][-1] != "i":
+                f.write(f"\n{cons.status}")
