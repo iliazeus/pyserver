@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+
+import atexit
+from code import InteractiveConsole
+from os import unlink, getenv
+from signal import signal, SIGINT, SIGTERM
+from socket import socket, AF_UNIX
+import sys
+
+session = {}
+
+lsock = socket(AF_UNIX)
+
+sockpath = getenv("PYSERVER_SOCKET") or "./.py.sock"
+lsock.bind(sockpath)
+atexit.register(unlink, sockpath)
+
+lsock.listen()
+signal(SIGINT, lambda _, _2: sys.exit(0))
+signal(SIGTERM, lambda _, _2: sys.exit(0))
+
+while True:
+    sock, _ = lsock.accept()
+    f = sock.makefile("rw", buffering=1)
+    sock.close()
+
+    with f:
+        argc = int(f.readline())
+        argv = [sys.argv[0]]
+        for i in range(argc):
+            l = int(f.readline())
+            argv.append(f.read(l))
+        f.read(1)
+        session["argv"] = argv
+
+        sys.stdout = f
+        cons = InteractiveConsole(locals=session)
+        for line in f:
+            cons.push(line)
+        cons.push("")
