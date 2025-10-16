@@ -51,7 +51,7 @@ receive_status() {
     if [ "$mode" == "-i" ]; then
         cat
     else
-        while read -r line; do
+        while IFS= read -r line; do
             if [ -n "${lastline+x}" ]; then
                 printf '%s\n' "$lastline"
             fi
