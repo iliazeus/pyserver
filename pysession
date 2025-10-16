@@ -8,7 +8,7 @@ from socket import socket, AF_UNIX
 import sys
 
 
-class PyserverConsole(InteractiveConsole):
+class PysessionConsole(InteractiveConsole):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.status = 0
@@ -55,7 +55,7 @@ while True:
         sys.stdout = f
         session["stdout"] = f
 
-        cons = PyserverConsole(locals=session)
+        cons = PysessionConsole(locals=session)
         if argv[-1][-1] == "i":
             cons.interact()
         else:
