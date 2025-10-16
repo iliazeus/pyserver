@@ -34,7 +34,7 @@ send_args() {
     if [ "$mode" == "-c" ]; then
         printf '%s\n' "$command"
     elif [ "$mode" == "-C" ]; then
-        printf '%s\n' "$command"
+        printf '%s; exit(0)\n' "$command"
         cat
     elif [ "$mode" == "-p" ]; then
         printf 'print(*(eval(x) for x in argv[1:]))\n'

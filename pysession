@@ -11,7 +11,7 @@ import sys
 class PysessionConsole(InteractiveConsole):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.status = 0
+        self.status = None
 
     def showtraceback(self, *args, **kwargs):
         self.status = 1
@@ -56,15 +56,17 @@ while True:
         session["stdout"] = f
 
         cons = PysessionConsole(locals=session)
+        session["exit"] = lambda s: cons.__setattr__("status", s)
+
         if argv[-1][-1] == "i":
             cons.interact()
         else:
             for line in f:
                 cons.push(line)
-                if cons.status != 0:
+                if cons.status is not None:
                     break
             else:
                 cons.push("")
 
             if argv[-1][-1] != "i":
-                f.write(f"\n{cons.status}")
+                f.write(f"\n{cons.status or 0}")
