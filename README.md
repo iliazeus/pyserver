@@ -13,12 +13,19 @@ avatar.png: PNG image data, 460 x 460, 8-bit/color RGBA, non-interlaced
 ```
 
 ```
-$ py -h
-py - pysession client (https://github.com/iliazeus/pysession)
-Usage: py -                      - run code from stdin
-       py [-c] <code> [...args]  - run code
-       py -C <code> [...args]    - run code with stdin
-       py -p [...args]           - print args
-       py -i [...args]           - interactive mode
-       py -h                     - this text
+$ py --help
+usage: py [-h] [-i] [-c [COMMAND ...]] [-p [PRINT ...]] [argv ...]
+
+pysession client (https://github.com/iliazeus/pysession)
+
+positional arguments:
+  argv
+
+options:
+  -h, --help            show this help message and exit
+  -i, --interactive     interactive mode
+  -c [COMMAND ...], --command [COMMAND ...]
+                        run code passed via args
+  -p [PRINT ...], --print [PRINT ...]
+                        pring args
 ```
