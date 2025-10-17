@@ -47,7 +47,7 @@ send_args() {
 }
 
 connect() {
-    nc -NU "${PYSERVER_SOCKET-./.py.sock}"
+    nc -NU "${PYSESSION_SOCKET-./.py.sock}"
 }
 
 receive_status() {

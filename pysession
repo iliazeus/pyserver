@@ -26,7 +26,7 @@ session = {}
 
 lsock = socket(AF_UNIX)
 
-sockpath = getenv("PYSERVER_SOCKET") or "./.py.sock"
+sockpath = getenv("PYSESSION_SOCKET") or "./.py.sock"
 lsock.bind(sockpath)
 atexit.register(unlink, sockpath)
 
