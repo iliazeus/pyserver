@@ -1,72 +1,175 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
+from argparse import ArgumentParser
+from array import array
 import atexit
 from code import InteractiveConsole
-from os import unlink, getenv
+from os import getenv, unlink
 from signal import signal, SIGINT, SIGTERM
-from socket import socket, AF_UNIX
+from socket import socket, AF_UNIX, CMSG_LEN, SCM_RIGHTS, SOL_SOCKET
+import struct
 import sys
+from typing import NamedTuple
 
 
-class PysessionConsole(InteractiveConsole):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.status = None
-
-    def showtraceback(self, *args, **kwargs):
-        self.status = 1
-        return super().showtraceback(*args, **kwargs)
-
-    def showsyntaxerror(self, *args, **kwargs):
-        self.status = 2
-        return super().showsyntaxerror(*args, **kwargs)
+class Request(NamedTuple):
+    fds: array[int]
+    argv: list[str]
+    env: dict[str]
 
 
-session = {}
+class Reader:
+    mem: memoryview
 
-lsock = socket(AF_UNIX)
+    def __init__(self, b: bytes):
+        self.mem = memoryview(b)
 
-sockpath = getenv("PYSESSION_SOCKET") or "./.py.sock"
-lsock.bind(sockpath)
-atexit.register(unlink, sockpath)
+    def read_int(self) -> int:
+        val = self.mem[:4].cast("i")[0]
+        self.mem = self.mem[4:]
+        return val
 
-lsock.listen()
-signal(SIGINT, lambda _, _2: sys.exit(0))
-signal(SIGTERM, lambda _, _2: sys.exit(0))
+    def read_str(self, encoding="utf-8") -> str:
+        val_len = self.read_int()
+        val = str(self.mem[:val_len], encoding)
+        self.mem = self.mem[val_len:]
+        return val
 
-while True:
-    sock, _ = lsock.accept()
-    f = sock.makefile("rw", buffering=1)
-    sock.close()
+    def read_str_list(self, encoding="utf-8") -> list[str]:
+        count = self.read_int()
+        val = []
+        for _ in range(count):
+            val.append(self.read_str())
+        return val
 
-    with f:
-        l = int(f.readline())
-        argv = [f.read(l)]
-        argc = int(f.readline())
-        for i in range(argc):
-            l = int(f.readline())
-            argv.append(f.read(l))
-        f.read(1)
-        session["argv"] = [*argv]
+    def read_str_dict(self, encoding="utf-8") -> dict[str, str]:
+        count = self.read_int()
+        val = {}
+        for _ in range(count):
+            key = self.read_str()
+            val[key] = self.read_str()
+        return val
 
-        sys.stdin = f
-        session["stdin"] = f
 
-        sys.stdout = f
-        session["stdout"] = f
+def receive_request(sock: socket) -> Request:
+    fds = array("i")
+
+    msg, ancdata, _flags, _addr = sock.recvmsg(8, CMSG_LEN(12))
+    version, req_len = struct.unpack("ii", msg)
+    assert version == 1
+
+    for cmsg_level, cmsg_type, cmsg_data in ancdata:
+        if cmsg_level == SOL_SOCKET and cmsg_type == SCM_RIGHTS:
+            fds.frombytes(cmsg_data[:12])
+
+    msg = Reader(sock.recv(req_len))
+    argv = msg.read_str_list()
+    env = msg.read_str_dict()
+
+    return Request(fds, argv, env)
+
+
+def send_response(sock: socket, exitcode: int):
+    msg = struct.pack("i", exitcode)
+    sock.send(msg)
+
+
+def run_cli(session: dict, req: Request) -> int:
+    class PysessionConsole(InteractiveConsole):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.status = None
+
+        def showtraceback(self, *args, **kwargs):
+            self.status = 1
+            return super().showtraceback(*args, **kwargs)
+
+        def showsyntaxerror(self, *args, **kwargs):
+            self.status = 2
+            return super().showsyntaxerror(*args, **kwargs)
+
+    stdin = open(req.fds[0], "r", buffering=1, closefd=True)
+    stdout = open(req.fds[1], "w", buffering=1, closefd=True)
+    stderr = open(req.fds[2], "w", buffering=1, closefd=True)
+
+    print(f"{stdin.isatty()=}")
+    print(f"{stdout.isatty()=}")
+    print(f"{stderr.isatty()=}")
+
+    old_stdin, sys.stdin = sys.stdin, stdin
+    old_stdout, sys.stdout = sys.stdout, stdout
+    old_stderr, sys.stderr = sys.stderr, stderr
+    try:
+        cli = ArgumentParser(prog="py", description="pysession client (https://github.com/iliazeus/pysession)")
+        cli.add_argument("-i", "--interactive", action="store_true", help="interactive mode")
+        cli.add_argument("-c", "--command", nargs="*", help="run code passed via args")
+        cli.add_argument("-p", "--print", nargs="*", help="pring args")
+        cli.add_argument("argv", nargs="*")
+        cli = cli.parse_args(req.argv)
+
+        session["stdin"] = stdin
+        session["stdout"] = stdout
+        session["stderr"] = stderr
+        session["argv"] = cli.argv
+        session["env"] = req.env
 
         cons = PysessionConsole(locals=session)
-        session["exit"] = lambda s: cons.__setattr__("status", s)
 
-        if argv[-1][-1] == "i":
+        if cli.interactive:
             cons.interact()
-        else:
-            for line in f:
-                cons.push(line)
-                if cons.status is not None:
-                    break
-            else:
-                cons.push("")
+            return 0
 
-            if argv[-1][-1] != "i":
-                f.write(f"\n{cons.status or 0}")
+        input_lines = stdin
+
+        if cli.command is not None or cli.print is not None:
+            input_lines = []
+
+        if cli.command is not None and len(cli.command) > 0:
+            input_lines = cli.command
+
+        for line in input_lines:
+            cons.push(line)
+            if cons.status is not None:
+                break
+        else:
+            cons.push("")
+
+        if cli.print is not None:
+            for item in cli.print:
+                cons.push(f"print({item})")
+
+        return cons.status or 0
+    except SystemExit as e:
+        return e.code
+    finally:
+        sys.stdin = old_stdin
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+
+def run_server(listen_sock: socket):
+    session = {}
+    while True:
+        sock, _ = listen_sock.accept()
+        with sock:
+            req = receive_request(sock)
+            code = run_cli(session, req)
+            send_response(sock, code or 0)
+
+
+def main():
+    signal(SIGINT, lambda _, _2: sys.exit(0))
+    signal(SIGTERM, lambda _, _2: sys.exit(0))
+
+    listen_sock_path = getenv("PYSESSION_SOCKET") or "./.py.sock"
+
+    listen_sock = socket(AF_UNIX)
+    listen_sock.bind(listen_sock_path)
+    atexit.register(unlink, listen_sock_path)
+
+    listen_sock.listen()
+    run_server(listen_sock)
+
+
+if __name__ == "__main__":
+    exit(main())

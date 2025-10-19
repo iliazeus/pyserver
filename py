@@ -1,67 +1,81 @@
-#!/bin/bash
-set -eu
+#!/usr/bin/env python
 
-if [ -z "${1-}" -o "${1-}" == "-h" ]; then
-    mode="-h"
-elif [ "$1" == "-c" -o "$1" == "-C" ]; then
-    mode="$1"
-    command="${2?}"
-    shift 2
-elif [ "$1" == "-p" -o "$1" == "-i" -o "$1" == "-" ]; then
-    mode="$1"
-    shift
-else
-    mode="-c"
-    command="$1"
-    shift
-fi
+from array import array
+from os import environ, getenv
+from socket import socket, AF_UNIX, CMSG_LEN, SCM_RIGHTS, SOL_SOCKET
+import struct
+import sys
+from typing import NamedTuple
 
-if [ "$mode" == "-h" ]; then
-    echo "py - pysession client (https://github.com/iliazeus/pysession)"
-    echo "Usage: py -                      - run code from stdin"
-    echo "       py [-c] <code> [...args]  - run code"
-    echo "       py -C <code> [...args]    - run code with stdin"
-    echo "       py -p [...args]           - print args"
-    echo "       py -i [...args]           - interactive mode"
-    echo "       py -h                     - this text"
-    exit 0
-fi
 
-send_args() {
-    printf '%d\n%s' ${#mode} "$mode"
-    printf '%d\n' $#
-    for v in "$@"; do
-        printf '%d\n%s' ${#v} "$v"
-    done
-    printf '\n'
-    if [ "$mode" == "-c" ]; then
-        printf '%s\n' "$command"
-    elif [ "$mode" == "-C" ]; then
-        printf '%s; exit(0)\n' "$command"
-        cat
-    elif [ "$mode" == "-p" ]; then
-        printf 'print(*(eval(x) for x in argv[1:]))\n'
-    else
-        cat
-    fi
-}
+class Request(NamedTuple):
+    fds: array[int]
+    argv: list[str]
+    env: dict[str]
 
-connect() {
-    nc -NU "${PYSESSION_SOCKET-./.py.sock}"
-}
 
-receive_status() {
-    if [ "$mode" == "-i" ]; then
-        cat
-    else
-        while IFS= read -r line; do
-            if [ -n "${lastline+x}" ]; then
-                printf '%s\n' "$lastline"
-            fi
-            lastline="$line"
-        done
-        exit "$line"
-    fi
-}
+class Writer:
+    buffs: list[bytes]
 
-send_args "$@" | connect | receive_status
+    def __init__(self):
+        self.buffs = []
+
+    def write_int(self, val: int):
+        self.buffs.append(struct.pack("i", val))
+
+    def write_str(self, val: str, encoding="utf-8"):
+        self.write_int(len(val))
+        self.buffs.append(val.encode(encoding))
+
+    def write_str_list(self, val: list[str], encoding="utf-8"):
+        self.write_int(len(val))
+        for item in val:
+            self.write_str(item, encoding)
+
+    def write_str_dict(self, val: dict[str, str], encoding="utf-8"):
+        self.write_int(len(val))
+        for key in val:
+            self.write_str(key, encoding)
+            self.write_str(val[key], encoding)
+
+
+def send_request(sock: socket, req: Request):
+    msg2 = Writer()
+    msg2.write_str_list(req.argv)
+    msg2.write_str_dict(req.env)
+    msg2 = msg2.buffs
+
+    version = 1
+    msg2_len = sum(len(b) for b in msg2)
+    msg = struct.pack("ii", version, msg2_len)
+    ancdata = (SOL_SOCKET, SCM_RIGHTS, req.fds)
+    sock.sendmsg([msg], [ancdata])
+
+    sock.sendmsg(msg2)
+
+
+def await_response(sock: socket) -> int:
+    sock.setblocking(True)
+    msg = sock.recv(4)
+    return struct.unpack("i", msg)[0]
+
+
+def main() -> int:
+    sock_path = getenv("PYSESSION_SOCKET") or "./.py.sock"
+
+    sock = socket(AF_UNIX)
+    sock.connect(sock_path)
+
+    fds = array("i", (0, 1, 2))
+    argv = sys.argv
+    env = dict(environ)
+
+    req = Request(fds, argv, env)
+    send_request(sock, req)
+
+    code = await_response(sock)
+    return code
+
+
+if __name__ == "__main__":
+    exit(main())
