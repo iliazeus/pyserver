@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 if [ -z "${1-}" -o "${1-}" == "-h" ]; then
