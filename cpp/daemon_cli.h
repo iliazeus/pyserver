@@ -84,7 +84,7 @@ public:
     void WriteString(const char *val, int len)
     {
         WriteInt((int) len);
-        for (size_t i = 0; i < len; i++)
+        for (int i = 0; i < len; i++)
         {
             m_buf.push_back(val[i]);
         }
@@ -101,6 +101,12 @@ public:
 
     void WriteEnvironArray(char **val)
     {
+        if (val == nullptr)
+        {
+            WriteInt(0);
+            return;
+        }
+
         int count = 0;
         for (char **p = val; *p != nullptr; p++) count += 1;
         WriteInt(count);
@@ -254,9 +260,9 @@ std::vector<char *> ToCstrVector(std::vector<std::string> &vec)
     return result;
 }
 
-std::error_code ServerListen(const std::string &socketPath,
-                             std::future<void> onStop,
-                             THandler &&handler)
+std::error_code RunServer(const std::string &socketPath,
+                          std::future<void> onStop,
+                          THandler &&handler)
 {
     int ret;
 
@@ -270,6 +276,7 @@ std::error_code ServerListen(const std::string &socketPath,
 
     ret = ::bind(listenSock, (struct sockaddr *) &sockaddr, sizeof(sockaddr));
     if (ret < 0) return std::make_error_code(std::errc(errno));
+    CDeferGuard deferUnlink = [&] { ::unlink(socketPath.c_str()); };
 
     ret = ::listen(listenSock, /* backlog */ 16);
     if (ret < 0) return std::make_error_code(std::errc(errno));
@@ -299,6 +306,11 @@ std::error_code ServerListen(const std::string &socketPath,
             ec = impl::ReceiveRequest(sock, &fds, &argv, &environ);
             if (ec) { std::cerr << ec.message() << std::endl; return; }
 
+            CDeferGuard deferCloseFds = [&]
+            {
+                for (int i = 0; i < 3; i++) ::close(fds[i]);
+            };
+
             int exitcode = handler(fds, std::move(argv), std::move(environ));
 
             ec = impl::SendResponse(sock, exitcode);
@@ -309,11 +321,11 @@ std::error_code ServerListen(const std::string &socketPath,
     return {};
 }
 
-std::error_code ClientMain(const std::string &socketPath,
-                           int argc,
-                           char **argv,
-                           char **environ,
-                           int *exitcode)
+std::error_code RunClient(const std::string &socketPath,
+                          int argc,
+                          char **argv,
+                          char **environ,
+                          int *exitcode)
 {
     int ret;
     std::error_code ec;

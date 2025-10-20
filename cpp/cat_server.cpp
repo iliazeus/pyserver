@@ -14,15 +14,14 @@ int main()
 {
     const char *socketPath = std::getenv("DAEMON_CLI_SOCKET");
     if (socketPath == nullptr) socketPath = "./.cli.sock";
-    daemon_cli::CDeferGuard deferUnlinkSocketPath = [&] { ::unlink(socketPath); };
 
     static std::promise<void> onStop;
     auto sighandler = +[](int) { onStop.set_value(); };
     ::signal(SIGINT, sighandler);
 
-    auto ec = daemon_cli::ServerListen(socketPath,
-                                       onStop.get_future(),
-                                       [] (auto fds, auto argv, auto env)
+    auto ec = daemon_cli::RunServer(socketPath,
+                                    onStop.get_future(),
+                                    [] (auto fds, auto argv, auto env)
     {
         int ret;
 
