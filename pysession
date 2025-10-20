@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 from array import array
 import atexit
 from code import InteractiveConsole
-from os import getenv, unlink
+from os import dup, dup2, getenv, close, unlink
 from signal import signal, SIGINT, SIGTERM
 from socket import socket, AF_UNIX, CMSG_LEN, SCM_RIGHTS, SOL_SOCKET
 import struct
@@ -88,38 +88,42 @@ def run_cli(session: dict, req: Request) -> int:
             self.status = 2
             return super().showsyntaxerror(*args, **kwargs)
 
-    stdin = open(req.fds[0], "r", buffering=1, closefd=True)
-    stdout = open(req.fds[1], "w", buffering=1, closefd=True)
-    stderr = open(req.fds[2], "w", buffering=1, closefd=True)
+    # can't just assign to sys.stdX because of:
+    # https://github.com/python/cpython/issues/36029
+    orig_fds = [-1, -1, -1]
+    for i in range(3):
+        orig_fds[i] = dup(i)
+        dup2(req.fds[i], i, inheritable=True)
+        close(req.fds[i])
 
-    print(f"{stdin.isatty()=}")
-    print(f"{stdout.isatty()=}")
-    print(f"{stderr.isatty()=}")
-
-    old_stdin, sys.stdin = sys.stdin, stdin
-    old_stdout, sys.stdout = sys.stdout, stdout
-    old_stderr, sys.stderr = sys.stderr, stderr
     try:
-        cli = ArgumentParser(prog="py", description="pysession client (https://github.com/iliazeus/pysession)")
-        cli.add_argument("-i", "--interactive", action="store_true", help="interactive mode")
+        cli = ArgumentParser(
+            prog="py",
+            description="pysession client (https://github.com/iliazeus/pysession)",
+        )
+        cli.add_argument(
+            "-i", "--interactive", action="store_true", help="interactive mode"
+        )
         cli.add_argument("-c", "--command", nargs="*", help="run code passed via args")
         cli.add_argument("-p", "--print", nargs="*", help="pring args")
         cli.add_argument("argv", nargs="*")
         cli = cli.parse_args(req.argv)
 
-        session["stdin"] = stdin
-        session["stdout"] = stdout
-        session["stderr"] = stderr
+        session["stdin"] = sys.stdin
+        session["stdout"] = sys.stdout
+        session["stderr"] = sys.stderr
         session["argv"] = cli.argv
         session["env"] = req.env
 
         cons = PysessionConsole(locals=session)
 
         if cli.interactive:
+            import readline  # side-effect imports, yay!
+
             cons.interact()
             return 0
 
-        input_lines = stdin
+        input_lines = sys.stdin
 
         if cli.command is not None or cli.print is not None:
             input_lines = []
@@ -139,12 +143,14 @@ def run_cli(session: dict, req: Request) -> int:
                 cons.push(f"print({item})")
 
         return cons.status or 0
+
     except SystemExit as e:
         return e.code
+
     finally:
-        sys.stdin = old_stdin
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+        for i in range(3):
+            dup2(orig_fds[i], i)
+            close(orig_fds[i])
 
 
 def run_server(listen_sock: socket):
