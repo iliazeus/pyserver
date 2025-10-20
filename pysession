@@ -15,7 +15,7 @@ from typing import NamedTuple
 class Request(NamedTuple):
     fds: array[int]
     argv: list[str]
-    env: dict[str]
+    environ: list[str]
 
 
 class Reader:
@@ -42,14 +42,6 @@ class Reader:
             val.append(self.read_str())
         return val
 
-    def read_str_dict(self, encoding="utf-8") -> dict[str, str]:
-        count = self.read_int()
-        val = {}
-        for _ in range(count):
-            key = self.read_str()
-            val[key] = self.read_str()
-        return val
-
 
 def receive_request(sock: socket) -> Request:
     fds = array("i")
@@ -64,9 +56,9 @@ def receive_request(sock: socket) -> Request:
 
     msg = Reader(sock.recv(req_len))
     argv = msg.read_str_list()
-    env = msg.read_str_dict()
+    environ = msg.read_str_list()
 
-    return Request(fds, argv, env)
+    return Request(fds, argv, environ)
 
 
 def send_response(sock: socket, exitcode: int):
@@ -113,7 +105,7 @@ def run_cli(session: dict, req: Request) -> int:
         session["stdout"] = sys.stdout
         session["stderr"] = sys.stderr
         session["argv"] = cli.argv
-        session["env"] = req.env
+        session["env"] = dict(kv.split("=", 1) for kv in req.environ)
 
         cons = PysessionConsole(locals=session)
 

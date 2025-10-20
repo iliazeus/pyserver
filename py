@@ -11,7 +11,7 @@ from typing import NamedTuple
 class Request(NamedTuple):
     fds: array[int]
     argv: list[str]
-    env: dict[str]
+    environ: list[str]
 
 
 class Writer:
@@ -32,17 +32,11 @@ class Writer:
         for item in val:
             self.write_str(item, encoding)
 
-    def write_str_dict(self, val: dict[str, str], encoding="utf-8"):
-        self.write_int(len(val))
-        for key in val:
-            self.write_str(key, encoding)
-            self.write_str(val[key], encoding)
-
 
 def send_request(sock: socket, req: Request):
     msg2 = Writer()
     msg2.write_str_list(req.argv)
-    msg2.write_str_dict(req.env)
+    msg2.write_str_list(req.environ)
     msg2 = msg2.buffs
 
     version = 1
@@ -68,7 +62,7 @@ def main() -> int:
 
     fds = array("i", (0, 1, 2))
     argv = sys.argv
-    env = dict(environ)
+    env = list(f"{k}={v}" for k, v in environ.items())
 
     req = Request(fds, argv, env)
     send_request(sock, req)
