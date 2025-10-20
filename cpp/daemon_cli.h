@@ -28,6 +28,9 @@ private:
     F m_f;
 };
 
+namespace impl
+{
+
 class CReader
 {
 public:
@@ -214,9 +217,42 @@ std::error_code ReceiveResponse(int sock, int *exitcode)
     return {};
 }
 
+} // namespace impl
+
 using THandler = std::function<int(std::array<int, 3> fds,
                                    std::vector<std::string> &&argv,
                                    std::vector<std::string> &&environ)>;
+
+const char *Getenv(char **environ, const char *name)
+{
+    for (; environ != nullptr; environ++)
+    {
+        const char *peq = std::strchr(*environ, '=');
+        int cmp = std::strncmp(*environ, name, peq - *environ);
+        if (cmp == 0) return peq + 1;
+    }
+    return nullptr;
+}
+
+const char *Getenv(const std::vector<std::string> &environ, const char *name)
+{
+    for (const auto &s : environ)
+    {
+        const char *peq = std::strchr(s.c_str(), '=');
+        int cmp = std::strncmp(s.c_str(), name, peq - s.c_str());
+        if (cmp == 0) return peq + 1;
+    }
+    return nullptr;
+}
+
+std::vector<char *> ToCstrVector(std::vector<std::string> &vec)
+{
+    std::vector<char *> result;
+    result.reserve(vec.size() + 1);
+    for (auto &s : vec) result.push_back(s.data());
+    result.push_back(nullptr);
+    return result;
+}
 
 std::error_code ServerListen(const std::string &socketPath,
                              std::future<void> onStop,
@@ -260,12 +296,12 @@ std::error_code ServerListen(const std::string &socketPath,
             std::array<int, 3> fds;
             std::vector<std::string> argv;
             std::vector<std::string> environ;
-            ec = ReceiveRequest(sock, &fds, &argv, &environ);
+            ec = impl::ReceiveRequest(sock, &fds, &argv, &environ);
             if (ec) { std::cerr << ec.message() << std::endl; return; }
 
             int exitcode = handler(fds, std::move(argv), std::move(environ));
 
-            ec = SendResponse(sock, exitcode);
+            ec = impl::SendResponse(sock, exitcode);
             if (ec) { std::cerr << ec.message() << std::endl; return; }
         } }.detach();
     }
@@ -294,10 +330,10 @@ std::error_code ClientMain(const std::string &socketPath,
     if (ret < 0) return std::make_error_code(std::errc(errno));
 
     int fds[3] = { 0, 1, 2 };
-    ec = SendRequest(sock, fds, argc, argv, environ);
+    ec = impl::SendRequest(sock, fds, argc, argv, environ);
     if (ec) return ec;
 
-    ec = ReceiveResponse(sock, exitcode);
+    ec = impl::ReceiveResponse(sock, exitcode);
     if (ec) return ec;
 
     return {};

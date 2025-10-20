@@ -45,15 +45,8 @@ int main()
             ::close(fds[i]);
         }
 
-        std::vector<char *> argvp;
-        argvp.reserve(argv.size() + 1);
-        for (auto &s : argv) argvp.push_back(s.data());
-        argvp.push_back(nullptr);
-
-        std::vector<char *> envp;
-        envp.reserve(env.size() + 1);
-        for (auto &s : env) envp.push_back(s.data());
-        envp.push_back(nullptr);
+        std::vector<char *> argvp = daemon_cli::ToCstrVector(argv);
+        std::vector<char *> envp = daemon_cli::ToCstrVector(env);
 
         ret = ::execvpe("cat", argvp.data(), envp.data());
         std::exit(-1);
