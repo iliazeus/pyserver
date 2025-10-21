@@ -101,6 +101,9 @@ def run_cli(session: dict, req: Request) -> int:
         cli.add_argument("argv", nargs="*")
         cli = cli.parse_args(req.argv)
 
+        if len(req.argv) == 1:
+            cli.interactive = sys.stdin.isatty()
+
         session["stdin"] = sys.stdin
         session["stdout"] = sys.stdout
         session["stderr"] = sys.stderr
