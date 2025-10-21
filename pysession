@@ -139,7 +139,12 @@ def run_cli(session: dict, req: Request) -> int:
     except SystemExit as e:
         return e.code
 
+    except:
+        return -1
+
     finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
         for i in range(3):
             dup2(orig_fds[i], i)
             close(orig_fds[i])
